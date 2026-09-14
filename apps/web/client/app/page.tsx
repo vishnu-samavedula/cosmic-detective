@@ -1,5 +1,10 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -71,6 +76,25 @@ type Card = {
 };
 type Candidate = { galaxy: Galaxy; exact: boolean; distance: number };
 type Inference = LabInference;
+type ObservationMode = 'single' | 'multi';
+type Detection = {
+  id: string;
+  label: string;
+  bbox: [number, number, number, number];
+  originalBbox?: [number, number, number, number];
+  image: string;
+  selected: boolean;
+  manual?: boolean;
+  inference?: Inference;
+  error?: string;
+};
+type DetectionRun = {
+  latencyMs: number;
+  ttftMs: number | null;
+  decodeMs: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+};
 const KEY = 'cosmic-detective-collection-v1';
 const LEARNING_KEY = 'cosmic-detective-learning-queue-v1';
 const MORPHOLOGY_GUIDE = {
@@ -128,16 +152,36 @@ export default function Home() {
     [scanning, setScanning] = useState(false),
     [shuffling, setShuffling] = useState(false),
     [modelChoice, setModelChoice] = useState<ModelChoice | null>(null),
+    [observationMode, setObservationMode] = useState<ObservationMode>('single'),
     [modelStatus, setModelStatus] = useState({ base: false, trained: false }),
     [inference, setInference] = useState<Inference | null>(null),
+    [detections, setDetections] = useState<Detection[]>([]),
+    [detectionRun, setDetectionRun] = useState<DetectionRun | null>(null),
+    [detecting, setDetecting] = useState(false),
+    [classifyingAll, setClassifyingAll] = useState(false),
+    [classificationStep, setClassificationStep] = useState(0),
+    [annotationMode, setAnnotationMode] = useState(false),
+    [draftBox, setDraftBox] = useState<[number, number, number, number] | null>(
+      null,
+    ),
+    [groundingReviewed, setGroundingReviewed] = useState(false),
+    [groundingConfirmation, setGroundingConfirmation] = useState(''),
+    [resizing, setResizing] = useState<{
+      id: string;
+      anchor: [number, number];
+      bbox: [number, number, number, number];
+    } | null>(null),
     [reviewedInference, setReviewedInference] = useState(false),
     [reviewConfirmation, setReviewConfirmation] = useState(''),
     [limit, setLimit] = useState(5),
     [zoom, setZoom] = useState(1);
   const input = useRef<HTMLInputElement>(null);
   const library = useRef<HTMLDivElement>(null);
+  const imageStage = useRef<HTMLDivElement>(null);
   const fullArchive = useRef<Galaxy[] | null>(null);
   const reviewTimer = useRef<number | null>(null);
+  const groundingReviewTimer = useRef<number | null>(null);
+  const drawStart = useRef<[number, number] | null>(null);
   useEffect(() => {
     fetch('/catalog.json')
       .then((r) => {
@@ -291,6 +335,17 @@ export default function Home() {
     setReviewedInference(false);
     setReviewConfirmation('');
   }
+  function resetGroundingReview() {
+    if (groundingReviewTimer.current)
+      window.clearTimeout(groundingReviewTimer.current);
+    groundingReviewTimer.current = null;
+    drawStart.current = null;
+    setResizing(null);
+    setDraftBox(null);
+    setAnnotationMode(false);
+    setGroundingReviewed(false);
+    setGroundingConfirmation('');
+  }
   function collect(g: Galaxy | null) {
     const id = g?.id || upload?.hash;
     if (!id) return;
@@ -352,7 +407,10 @@ export default function Home() {
     setModelChoice(null);
     setCandidates([]);
     setInference(null);
+    setDetections([]);
+    setDetectionRun(null);
     resetReview();
+    resetGroundingReview();
     setZoom(1);
     setNotice('');
     setTab('investigate');
@@ -439,12 +497,11 @@ export default function Home() {
   function rankCandidates(
     descriptor: number[],
     hash: string,
-    label?: 'spiral' | 'elliptical',
+    label: 'spiral' | 'elliptical',
   ) {
     const matching = catalog.filter(
       (g) =>
         g.hash === hash ||
-        !label ||
         (label === 'spiral'
           ? g.kind === 'Spiral structure'
           : g.kind === 'Smooth appearance'),
@@ -504,6 +561,349 @@ export default function Home() {
       1;
     return values.map((value) => (value - mean) / norm);
   }
+  async function cropDetection(
+    image: string,
+    bbox: [number, number, number, number],
+  ) {
+    const blob = await (await fetch(image)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const [x1, y1, x2, y2] = bbox;
+    const centerX = ((x1 + x2) / 2) * bitmap.width;
+    const centerY = ((y1 + y2) / 2) * bitmap.height;
+    const boxSize = Math.max(
+      (x2 - x1) * bitmap.width,
+      (y2 - y1) * bitmap.height,
+    );
+    const size = Math.min(
+      Math.max(boxSize * 1.35, 32),
+      bitmap.width,
+      bitmap.height,
+    );
+    const sourceX = Math.max(
+      0,
+      Math.min(bitmap.width - size, centerX - size / 2),
+    );
+    const sourceY = Math.max(
+      0,
+      Math.min(bitmap.height - size, centerY - size / 2),
+    );
+    const canvas = document.createElement('canvas');
+    canvas.width = 424;
+    canvas.height = 424;
+    canvas
+      .getContext('2d')!
+      .drawImage(bitmap, sourceX, sourceY, size, size, 0, 0, 424, 424);
+    bitmap.close();
+    return canvas.toDataURL('image/jpeg', 0.88);
+  }
+  async function requestMorphology(image: string, model: ModelChoice) {
+    const response = await fetch('/api/classify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image, model }),
+    });
+    const result = (await response.json()) as Partial<Inference> & {
+      error?: string;
+    };
+    if (!response.ok) throw Error(result.error || 'The model scan failed.');
+    return result as Inference;
+  }
+  async function detectObjects() {
+    if (!shown) return;
+    if (!modelStatus.base) {
+      setError('The base 450M grounding endpoint is unavailable.');
+      return;
+    }
+    setDetecting(true);
+    setError('');
+    setNotice('');
+    setInference(null);
+    setCandidates([]);
+    setDetections([]);
+    setDetectionRun(null);
+    resetGroundingReview();
+    try {
+      const image = await asInferenceImage(shown);
+      const response = await fetch('/api/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image }),
+      });
+      const result = (await response.json()) as {
+        detections?: Array<{
+          label: string;
+          bbox: [number, number, number, number];
+        }>;
+        latencyMs?: number;
+        ttftMs?: number | null;
+        decodeMs?: number | null;
+        inputTokens?: number | null;
+        outputTokens?: number | null;
+        error?: string;
+      };
+      if (!response.ok)
+        throw Error(result.error || 'The field could not be mapped.');
+      const found = Array.isArray(result.detections) ? result.detections : [];
+      const crops = await Promise.all(
+        found.map(async (item, index) => ({
+          id: `object-${index + 1}`,
+          label: item.label || 'galaxy',
+          bbox: item.bbox,
+          originalBbox: item.bbox,
+          image: await cropDetection(image, item.bbox),
+          selected: true,
+        })),
+      );
+      setDetections(crops);
+      setDetectionRun({
+        latencyMs: result.latencyMs || 0,
+        ttftMs: result.ttftMs ?? null,
+        decodeMs: result.decodeMs ?? null,
+        inputTokens: result.inputTokens ?? null,
+        outputTokens: result.outputTokens ?? null,
+      });
+      setNotice(
+        crops.length
+          ? `${crops.length} object${crops.length === 1 ? '' : 's'} mapped. Review the boxes, then run morphology.`
+          : 'The base model did not map any galaxy-like objects in this field.',
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'The field could not be mapped.',
+      );
+    } finally {
+      setDetecting(false);
+    }
+  }
+  async function classifyAllDetections() {
+    if (!modelChoice) {
+      setError('Choose the base or trained checkpoint for morphology.');
+      return;
+    }
+    const selected = detections.filter((item) => item.selected);
+    if (!selected.length) {
+      setError('Select at least one mapped object.');
+      return;
+    }
+    setClassifyingAll(true);
+    setClassificationStep(0);
+    setError('');
+    setNotice('');
+    for (let index = 0; index < selected.length; index += 1) {
+      const item = selected[index];
+      try {
+        const result = await requestMorphology(item.image, modelChoice);
+        setDetections((current) =>
+          current.map((detection) =>
+            detection.id === item.id
+              ? { ...detection, inference: result, error: undefined }
+              : detection,
+          ),
+        );
+      } catch (e) {
+        setDetections((current) =>
+          current.map((detection) =>
+            detection.id === item.id
+              ? {
+                  ...detection,
+                  inference: undefined,
+                  error:
+                    e instanceof Error ? e.message : 'Morphology scan failed.',
+                }
+              : detection,
+          ),
+        );
+      }
+      setClassificationStep(index + 1);
+    }
+    setClassifyingAll(false);
+    setNotice(
+      `Morphology completed for ${selected.length} mapped object${selected.length === 1 ? '' : 's'}.`,
+    );
+  }
+  function pointFromStage(clientX: number, clientY: number) {
+    const bounds = imageStage.current?.getBoundingClientRect();
+    if (!bounds) return [0, 0] as [number, number];
+    return [
+      Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width)),
+      Math.max(0, Math.min(1, (clientY - bounds.top) / bounds.height)),
+    ] as [number, number];
+  }
+  function pointInStage(event: ReactPointerEvent<HTMLDivElement>) {
+    return pointFromStage(event.clientX, event.clientY);
+  }
+  function squareFromPoints(
+    start: [number, number],
+    current: [number, number],
+  ) {
+    const dx = current[0] - start[0];
+    const dy = current[1] - start[1];
+    const size = Math.max(Math.abs(dx), Math.abs(dy));
+    const endX = Math.max(0, Math.min(1, start[0] + (dx < 0 ? -size : size)));
+    const endY = Math.max(0, Math.min(1, start[1] + (dy < 0 ? -size : size)));
+    return [
+      Math.min(start[0], endX),
+      Math.min(start[1], endY),
+      Math.max(start[0], endX),
+      Math.max(start[1], endY),
+    ] as [number, number, number, number];
+  }
+  function beginAnnotation(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!annotationMode || !shown) return;
+    const point = pointInStage(event);
+    drawStart.current = point;
+    setDraftBox([point[0], point[1], point[0], point[1]]);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function moveAnnotation(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!annotationMode || !drawStart.current) return;
+    setDraftBox(squareFromPoints(drawStart.current, pointInStage(event)));
+  }
+  async function finishAnnotation(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!annotationMode || !drawStart.current || !shown) return;
+    const box = squareFromPoints(drawStart.current, pointInStage(event));
+    drawStart.current = null;
+    setDraftBox(null);
+    if (box[2] - box[0] < 0.02 || box[3] - box[1] < 0.02) return;
+    try {
+      const image = await asInferenceImage(shown);
+      const crop = await cropDetection(image, box);
+      setDetections((items) => [
+        ...items,
+        {
+          id: `manual-${Date.now()}`,
+          label: 'galaxy',
+          bbox: box,
+          image: crop,
+          selected: true,
+          manual: true,
+        },
+      ]);
+      setNotice('Manual object added. Add another or submit the correction.');
+    } catch {
+      setError('The manual annotation could not be prepared.');
+    }
+  }
+  function beginResize(
+    event: ReactPointerEvent<HTMLSpanElement>,
+    detection: Detection,
+    corner: 'nw' | 'ne' | 'sw' | 'se',
+  ) {
+    if (!annotationMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const [x1, y1, x2, y2] = detection.bbox;
+    setResizing({
+      id: detection.id,
+      bbox: detection.bbox,
+      anchor:
+        corner === 'nw'
+          ? [x2, y2]
+          : corner === 'ne'
+            ? [x1, y2]
+            : corner === 'sw'
+              ? [x2, y1]
+              : [x1, y1],
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function moveResize(event: ReactPointerEvent<HTMLSpanElement>) {
+    if (!annotationMode || !resizing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = pointFromStage(event.clientX, event.clientY);
+    const bbox = [
+      Math.min(resizing.anchor[0], point[0]),
+      Math.min(resizing.anchor[1], point[1]),
+      Math.max(resizing.anchor[0], point[0]),
+      Math.max(resizing.anchor[1], point[1]),
+    ] as [number, number, number, number];
+    if (bbox[2] - bbox[0] < 0.015 || bbox[3] - bbox[1] < 0.015) return;
+    setResizing({ ...resizing, bbox });
+    setDetections((items) =>
+      items.map((item) => (item.id === resizing.id ? { ...item, bbox } : item)),
+    );
+  }
+  async function finishResize(event: ReactPointerEvent<HTMLSpanElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setResizing(null);
+    if (!resizing || !shown) return;
+    const detection = detections.find((item) => item.id === resizing.id);
+    if (!detection) return;
+    try {
+      const image = await asInferenceImage(shown);
+      const crop = await cropDetection(image, resizing.bbox);
+      setDetections((items) =>
+        items.map((item) =>
+          item.id === resizing.id ? { ...item, image: crop } : item,
+        ),
+      );
+      setNotice('Box resized. Submit the corrected map when ready.');
+    } catch {
+      setError('The resized annotation crop could not be prepared.');
+    }
+  }
+  async function submitGroundingFeedback(
+    verdict: 'confirmed' | 'corrected' | 'uncertain',
+  ) {
+    if (!shown || !detections.length) return;
+    try {
+      const sourceId = upload?.hash || active?.hash;
+      if (!sourceId) return;
+      const predictedBoxes = detections
+        .filter((item) => !item.manual)
+        .map((item) => item.originalBbox || item.bbox);
+      const correctedBoxes = detections
+        .filter((item) => item.selected)
+        .map((item) => item.bbox);
+      const preview = await makeObservationPreview(shown);
+      const example: LearningExample = {
+        id: `grounding-${sourceId}`,
+        image: preview,
+        sourceName: upload?.name || active?.name || 'Observation',
+        task: 'grounding',
+        prediction: `${predictedBoxes.length} boxes`,
+        verdict:
+          verdict === 'confirmed'
+            ? 'grounding-confirmed'
+            : verdict === 'corrected'
+              ? 'grounding-corrected'
+              : 'grounding-uncertain',
+        predictedBoxes,
+        correctedBoxes:
+          verdict === 'uncertain'
+            ? undefined
+            : verdict === 'confirmed'
+              ? predictedBoxes
+              : correctedBoxes,
+        checkpoint: 'base',
+        createdAt: new Date().toISOString(),
+      };
+      setLearningQueue((items) => [
+        example,
+        ...items.filter((item) => item.id !== example.id),
+      ]);
+      setGroundingReviewed(true);
+      setAnnotationMode(false);
+      setGroundingConfirmation(
+        verdict === 'confirmed'
+          ? `Mapping confirmed · ${predictedBoxes.length} boxes`
+          : verdict === 'corrected'
+            ? `Correction saved · ${correctedBoxes.length} boxes`
+            : 'Mapping queued for human review',
+      );
+      if (groundingReviewTimer.current)
+        window.clearTimeout(groundingReviewTimer.current);
+      groundingReviewTimer.current = window.setTimeout(() => {
+        setGroundingConfirmation('');
+        groundingReviewTimer.current = null;
+      }, 2200);
+      setNotice('Grounding feedback added to the Learning Loop inbox.');
+    } catch {
+      setError('The grounding feedback could not be saved.');
+    }
+  }
   async function classify(
     image = upload?.image || active?.image,
     hash = upload?.hash || active?.hash,
@@ -543,8 +943,7 @@ export default function Home() {
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The model scan failed.');
-      if (descriptor.length === 256)
-        setCandidates(rankCandidates(descriptor, hash));
+      setCandidates([]);
     } finally {
       setScanning(false);
     }
@@ -606,8 +1005,11 @@ export default function Home() {
       setActive(null);
       setModelChoice(null);
       setInference(null);
+      setDetections([]);
+      setDetectionRun(null);
       resetReview();
-      setCandidates(rankCandidates(d, hash));
+      resetGroundingReview();
+      setCandidates([]);
       setNotice('Observation ready. Choose a model, then run inference.');
     } catch (e) {
       setError(
@@ -693,6 +1095,9 @@ export default function Home() {
     }
   }
   const shown = upload?.image || active?.image;
+  const selectedDetectionCount = detections.filter(
+    (detection) => detection.selected,
+  ).length;
   return (
     <main className="observatory">
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
@@ -725,9 +1130,6 @@ export default function Home() {
               </span>
             </TabsTrigger>
           </TabsList>
-          <span className="header-note">
-            <i /> PERSONAL OBSERVATORY
-          </span>
         </header>
         {error && (
           <div className="feedback error" role="alert">
@@ -757,7 +1159,13 @@ export default function Home() {
                 <Button
                   className="upload-button"
                   onClick={() => input.current?.click()}
-                  disabled={busy || !catalog.length}
+                  disabled={
+                    busy ||
+                    scanning ||
+                    detecting ||
+                    classifyingAll ||
+                    !catalog.length
+                  }
                 >
                   <Upload size={16} />
                   {busy ? 'Preparing image…' : 'Upload an observation'}
@@ -771,7 +1179,7 @@ export default function Home() {
                   onChange={(e) => receive(e.target.files?.[0])}
                 />
                 <span className="small">
-                  JPEG, PNG, WebP · resized before LQH inference
+                  JPEG, PNG, WebP · resized before VLM inference
                 </span>
               </div>
             </div>
@@ -789,22 +1197,96 @@ export default function Home() {
                     <i />
                     {upload ? 'YOUR OBSERVATION' : 'ARCHIVE TRANSMISSION'}
                   </span>
-                  <span>{upload ? 'LQH VISION INPUT' : 'SDSS / OPTICAL'}</span>
+                  <span>{upload ? 'VLM INPUT' : 'SDSS / OPTICAL'}</span>
                 </div>
                 <div className="view-image">
                   {shown ? (
-                    <Image
-                      unoptimized
-                      width={424}
-                      height={424}
-                      src={shown}
-                      alt={
-                        upload
-                          ? 'Your uploaded observation'
-                          : `Galaxy ${active?.id}`
-                      }
+                    <div
+                      ref={imageStage}
+                      className={`image-stage ${annotationMode ? 'annotating' : ''}`}
                       style={{ transform: `scale(${zoom})` }}
-                    />
+                      onPointerDown={beginAnnotation}
+                      onPointerMove={moveAnnotation}
+                      onPointerUp={(event) => void finishAnnotation(event)}
+                    >
+                      <Image
+                        unoptimized
+                        width={424}
+                        height={424}
+                        src={shown}
+                        alt={
+                          upload
+                            ? 'Your uploaded observation'
+                            : `Galaxy ${active?.id}`
+                        }
+                        draggable={false}
+                      />
+                      {observationMode === 'multi' &&
+                        detections.map((detection, index) => {
+                          const [x1, y1, x2, y2] = detection.bbox;
+                          return (
+                            <button
+                              key={detection.id}
+                              type="button"
+                              className="detection-box"
+                              data-selected={detection.selected}
+                              data-manual={Boolean(detection.manual)}
+                              aria-label={`${detection.selected ? 'Exclude' : 'Include'} object ${index + 1}`}
+                              style={{
+                                left: `${x1 * 100}%`,
+                                top: `${y1 * 100}%`,
+                                width: `${(x2 - x1) * 100}%`,
+                                height: `${(y2 - y1) * 100}%`,
+                              }}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={() =>
+                                setDetections((items) =>
+                                  items.map((item) =>
+                                    item.id === detection.id
+                                      ? { ...item, selected: !item.selected }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              <span className="detection-index">
+                                {String(index + 1).padStart(2, '0')}
+                              </span>
+                              {annotationMode &&
+                                (['nw', 'ne', 'sw', 'se'] as const).map(
+                                  (corner) => (
+                                    <span
+                                      key={corner}
+                                      className={`resize-handle ${corner}`}
+                                      role="presentation"
+                                      onPointerDown={(event) =>
+                                        beginResize(event, detection, corner)
+                                      }
+                                      onPointerMove={moveResize}
+                                      onPointerUp={(event) =>
+                                        void finishResize(event)
+                                      }
+                                      onClick={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                    />
+                                  ),
+                                )}
+                            </button>
+                          );
+                        })}
+                      {annotationMode && draftBox && (
+                        <span
+                          className="draft-detection-box"
+                          style={{
+                            left: `${draftBox[0] * 100}%`,
+                            top: `${draftBox[1] * 100}%`,
+                            width: `${(draftBox[2] - draftBox[0]) * 100}%`,
+                            height: `${(draftBox[3] - draftBox[1]) * 100}%`,
+                          }}
+                        />
+                      )}
+                    </div>
                   ) : (
                     <button
                       className="empty-viewer-action"
@@ -819,30 +1301,6 @@ export default function Home() {
                   )}
                   <div className="reticle" aria-hidden="true" />
                 </div>
-                {shown && (
-                  <div className="viewer-inference-action">
-                    <Button
-                      className="primary-action"
-                      disabled={
-                        scanning ||
-                        busy ||
-                        !modelChoice ||
-                        !modelStatus[modelChoice]
-                      }
-                      onClick={() => void classify()}
-                    >
-                      <Scan size={16} />
-                      {scanning
-                        ? 'Running inference…'
-                        : modelChoice
-                          ? `Run inference · ${modelChoice === 'trained' ? 'trained' : 'base'} 450M`
-                          : 'Choose a model to run inference'}
-                    </Button>
-                    {modelChoice && !modelStatus[modelChoice] && (
-                      <span>Selected LQH endpoint is unavailable.</span>
-                    )}
-                  </div>
-                )}
                 <div className="viewer-bottom">
                   <span className="small">
                     {upload
@@ -870,45 +1328,127 @@ export default function Home() {
               </div>
               <aside className="readout">
                 <div className="eyebrow">
-                  {upload
-                    ? scanning
-                      ? 'MODEL SCAN IN PROGRESS'
-                      : 'MODEL OBSERVATION'
-                    : 'IN THE ARCHIVE'}
+                  {observationMode === 'multi' && shown
+                    ? detecting
+                      ? 'VISUAL GROUNDING IN PROGRESS'
+                      : scanning || classifyingAll
+                        ? 'MODEL SCAN IN PROGRESS'
+                        : 'MODEL OBSERVATION'
+                    : upload
+                      ? scanning
+                        ? 'MODEL SCAN IN PROGRESS'
+                        : 'MODEL OBSERVATION'
+                      : 'IN THE ARCHIVE'}
                 </div>
                 <h2>
-                  {upload
-                    ? scanning
-                      ? 'Reading the signal…'
-                      : inference
-                        ? `${inference.label[0].toUpperCase() + inference.label.slice(1)} detected.`
-                        : 'Ready to classify.'
-                    : active?.kind || 'Looking for a signal'}
+                  {observationMode === 'multi' && shown
+                    ? detecting
+                      ? 'Mapping the field…'
+                      : detections.length
+                        ? `${detections.length} object${detections.length === 1 ? '' : 's'} mapped.`
+                        : 'Ready to map the field.'
+                    : upload
+                      ? scanning
+                        ? 'Reading the signal…'
+                        : inference
+                          ? `${inference.label[0].toUpperCase() + inference.label.slice(1)} detected.`
+                          : 'Ready to classify.'
+                      : active?.kind || 'Looking for a signal'}
                 </h2>
                 <span className="status-badge">
-                  {upload
-                    ? inference
-                      ? inference.model === 'trained'
-                        ? 'GZ2 TRAINED · 450M'
-                        : 'BASE · 450M'
-                      : 'IDENTITY UNRESOLVED'
-                    : 'KNOWN SOURCE IMAGE'}
+                  {observationMode === 'multi' && shown
+                    ? detections.length
+                      ? 'MULTI-OBJECT · BASE 450M GROUNDING'
+                      : 'MULTI-OBJECT · READY'
+                    : upload
+                      ? inference
+                        ? inference.model === 'trained'
+                          ? 'GZ2 TRAINED · 450M'
+                          : 'BASE · 450M'
+                        : 'IDENTITY UNRESOLVED'
+                      : active
+                        ? 'KNOWN SOURCE IMAGE'
+                        : 'NO SOURCE SELECTED'}
                 </span>
                 <p>
-                  {upload
-                    ? inference
-                      ? `The ${inference.model === 'trained' ? 'post-trained' : 'base'} vision model classified the visible central galaxy. This is a morphology reading, not an exact object identification.`
-                      : 'Choose a model and scan the uploaded galaxy.'
-                    : active?.description}
+                  {observationMode === 'multi' && shown
+                    ? detections.length
+                      ? 'The base VLM proposed these regions. Select the boxes to include, then classify each crop with your chosen morphology model.'
+                      : 'Stage one asks the base VLM to locate galaxy-like sources. Stage two classifies each selected crop.'
+                    : upload
+                      ? inference
+                        ? `The ${inference.model === 'trained' ? 'post-trained' : 'base'} vision model classified the visible central galaxy. This is a morphology reading, not an exact object identification.`
+                        : 'Choose a model and scan the uploaded galaxy.'
+                      : active?.description ||
+                        'Upload an observation or choose an archive image.'}
                 </p>
+                <div className="observation-control">
+                  <span>Observation mode</span>
+                  <RadioGroup
+                    value={observationMode}
+                    disabled={busy || scanning || detecting || classifyingAll}
+                    onValueChange={(value) => {
+                      setObservationMode(value as ObservationMode);
+                      setInference(null);
+                      setCandidates([]);
+                      setDetections([]);
+                      setDetectionRun(null);
+                      setClassificationStep(0);
+                      resetReview();
+                      resetGroundingReview();
+                      setError('');
+                      setNotice(
+                        value === 'multi'
+                          ? 'Multi-object mode selected. Map the field when ready.'
+                          : 'Single-object mode selected.',
+                      );
+                    }}
+                    className="observation-slider"
+                    aria-label="Observation mode"
+                  >
+                    <label
+                      htmlFor="observation-single"
+                      data-active={observationMode === 'single'}
+                    >
+                      <RadioGroupItem id="observation-single" value="single" />
+                      <i className="orbit-glyph single" aria-hidden="true" />
+                      <span>
+                        Single object<small>Central target</small>
+                      </span>
+                    </label>
+                    <label
+                      htmlFor="observation-multi"
+                      data-active={observationMode === 'multi'}
+                    >
+                      <RadioGroupItem id="observation-multi" value="multi" />
+                      <i className="orbit-glyph multi" aria-hidden="true" />
+                      <span>
+                        Multi object<small>Map the field</small>
+                      </span>
+                    </label>
+                  </RadioGroup>
+                </div>
                 <div className="model-control">
-                  <span>Vision model</span>
+                  <span>
+                    {observationMode === 'multi'
+                      ? 'Morphology model'
+                      : 'Vision model'}
+                  </span>
                   <RadioGroup
                     value={modelChoice || ''}
+                    disabled={busy || scanning || detecting || classifyingAll}
                     onValueChange={(value) => {
                       if (value) {
                         setModelChoice(value as ModelChoice);
                         setInference(null);
+                        setDetections((items) =>
+                          items.map((item) => ({
+                            ...item,
+                            inference: undefined,
+                            error: undefined,
+                          })),
+                        );
+                        setClassificationStep(0);
                         resetReview();
                         setNotice('Model selected. Run inference when ready.');
                       }
@@ -948,7 +1488,7 @@ export default function Home() {
                       </span>
                     </label>
                   </RadioGroup>
-                  {shown && (
+                  {shown && observationMode === 'single' && (
                     <Button
                       variant="outline"
                       className="scan-button"
@@ -968,7 +1508,140 @@ export default function Home() {
                           : 'Choose a model first'}
                     </Button>
                   )}
-                  {inference && (
+                  {shown &&
+                    observationMode === 'multi' &&
+                    !detections.length && (
+                      <Button
+                        variant="outline"
+                        className="scan-button"
+                        disabled={detecting || busy || !modelStatus.base}
+                        onClick={() => void detectObjects()}
+                      >
+                        <Scan size={16} />
+                        {detecting
+                          ? 'Mapping field…'
+                          : 'Detect objects · base 450M'}
+                      </Button>
+                    )}
+                  {shown &&
+                    observationMode === 'multi' &&
+                    detections.length > 0 && (
+                      <div className="multi-scan-actions">
+                        <Button
+                          variant="outline"
+                          className="scan-button"
+                          disabled={
+                            classifyingAll ||
+                            !selectedDetectionCount ||
+                            !modelChoice ||
+                            !modelStatus[modelChoice]
+                          }
+                          onClick={() => void classifyAllDetections()}
+                        >
+                          <Scan size={16} />
+                          {classifyingAll
+                            ? `Classifying ${classificationStep}/${selectedDetectionCount}…`
+                            : modelChoice
+                              ? `Run morphology on ${selectedDetectionCount}`
+                              : 'Choose a morphology model'}
+                        </Button>
+                        <button
+                          type="button"
+                          className="map-again"
+                          disabled={classifyingAll || detecting}
+                          onClick={() => void detectObjects()}
+                        >
+                          Map field again
+                        </button>
+                        <small>
+                          Base 450M finds regions · selected model reads each
+                          crop
+                        </small>
+                      </div>
+                    )}
+                  {observationMode === 'multi' && detectionRun && (
+                    <output className="grounding-metrics">
+                      <span>
+                        <b>{detections.length}</b> mapped
+                      </span>
+                      <span>
+                        <b>{duration(detectionRun.ttftMs)}</b> TTFT
+                      </span>
+                      <span>
+                        <b>{duration(detectionRun.latencyMs)}</b> total
+                      </span>
+                    </output>
+                  )}
+                  {observationMode === 'multi' &&
+                    detections.length > 0 &&
+                    !groundingReviewed &&
+                    (annotationMode ? (
+                      <div className="grounding-review editing">
+                        <span>Correct the object map</span>
+                        <p>
+                          Drag on the image to add a square. Click an existing
+                          box to exclude or restore it, or drag its corner
+                          handles to resize it.
+                        </p>
+                        <div>
+                          <button
+                            onClick={() =>
+                              void submitGroundingFeedback('corrected')
+                            }
+                          >
+                            Submit corrected map
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAnnotationMode(false);
+                              setDraftBox(null);
+                              drawStart.current = null;
+                              setDetections((items) =>
+                                items
+                                  .filter((item) => !item.manual)
+                                  .map((item) => ({
+                                    ...item,
+                                    selected: true,
+                                  })),
+                              );
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grounding-review">
+                        <span>Does this object map look right?</span>
+                        <div>
+                          <button
+                            onClick={() =>
+                              void submitGroundingFeedback('confirmed')
+                            }
+                          >
+                            Confirm
+                          </button>
+                          <button onClick={() => setAnnotationMode(true)}>
+                            Edit boxes
+                          </button>
+                          <button
+                            onClick={() =>
+                              void submitGroundingFeedback('uncertain')
+                            }
+                          >
+                            Unsure
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  {observationMode === 'multi' &&
+                    groundingReviewed &&
+                    groundingConfirmation && (
+                      <output className="human-review-confirmation">
+                        <Check size={15} /> {groundingConfirmation}
+                      </output>
+                    )}
+                  {observationMode === 'single' && inference && (
                     <output className="inline-inference-result">
                       <span>MODEL RESULT</span>
                       <strong>
@@ -1017,59 +1690,89 @@ export default function Home() {
                       </em>
                     </output>
                   )}
-                  {inference && !reviewedInference && (
-                    <div className="human-review">
-                      <span>Does this reading look right?</span>
-                      <div>
-                        <button
-                          onClick={() => void reviewInference('confirmed')}
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => void reviewInference('corrected')}
-                        >
-                          Correct to{' '}
-                          {inference.label === 'spiral'
-                            ? 'elliptical'
-                            : 'spiral'}
-                        </button>
-                        <button
-                          onClick={() => void reviewInference('uncertain')}
-                        >
-                          Unsure
-                        </button>
+                  {observationMode === 'single' &&
+                    inference &&
+                    !reviewedInference && (
+                      <div className="human-review">
+                        <span>Does this reading look right?</span>
+                        <div>
+                          <button
+                            onClick={() => void reviewInference('confirmed')}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => void reviewInference('corrected')}
+                          >
+                            Correct to{' '}
+                            {inference.label === 'spiral'
+                              ? 'elliptical'
+                              : 'spiral'}
+                          </button>
+                          <button
+                            onClick={() => void reviewInference('uncertain')}
+                          >
+                            Unsure
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {inference && reviewedInference && reviewConfirmation && (
-                    <output className="human-review-confirmation">
-                      <Check size={15} /> {reviewConfirmation}
-                    </output>
-                  )}
+                    )}
+                  {observationMode === 'single' &&
+                    inference &&
+                    reviewedInference &&
+                    reviewConfirmation && (
+                      <output className="human-review-confirmation">
+                        <Check size={15} /> {reviewConfirmation}
+                      </output>
+                    )}
                 </div>
                 <div className="readout-row">
-                  <span>{upload ? 'Morphology' : 'Catalog identifier'}</span>
+                  <span>
+                    {observationMode === 'multi'
+                      ? 'Objects selected'
+                      : upload
+                        ? 'Morphology'
+                        : 'Catalog identifier'}
+                  </span>
                   <strong>
-                    {upload
-                      ? inference
-                        ? inference.label
-                        : 'Awaiting inference'
-                      : active?.name || '—'}
+                    {observationMode === 'multi'
+                      ? detections.length
+                        ? `${selectedDetectionCount} of ${detections.length}`
+                        : 'Awaiting grounding'
+                      : upload
+                        ? inference
+                          ? inference.label
+                          : 'Awaiting inference'
+                        : active?.name || '—'}
                   </strong>
                 </div>
                 <div className="readout-row">
-                  <span>{upload ? 'Catalog identity' : 'Evidence'}</span>
+                  <span>
+                    {observationMode === 'multi'
+                      ? 'Morphology results'
+                      : upload
+                        ? 'Catalog identity'
+                        : 'Evidence'}
+                  </span>
                   <strong>
-                    {upload
-                      ? 'Not established'
-                      : 'Galaxy Zoo volunteer classifications'}
+                    {observationMode === 'multi'
+                      ? `${detections.filter((item) => item.inference).length} completed`
+                      : upload
+                        ? 'Not established'
+                        : 'Galaxy Zoo volunteer classifications'}
                   </strong>
                 </div>
                 <div className="readout-actions">
                   <Button
                     className="primary-action"
-                    disabled={!shown || busy || scanning}
+                    disabled={
+                      !shown ||
+                      busy ||
+                      scanning ||
+                      detecting ||
+                      classifyingAll ||
+                      observationMode === 'multi'
+                    }
                     onClick={() => collect(upload ? null : active)}
                   >
                     <Plus size={16} />
@@ -1099,24 +1802,95 @@ export default function Home() {
                 {notice}
               </output>
             )}
-            {upload && (
+            {shown && observationMode === 'multi' && detections.length > 0 && (
+              <section className="object-section">
+                <div className="section-heading">
+                  <div>
+                    <div className="eyebrow">STAGE 02 / MORPHOLOGY CROPS</div>
+                    <h2>Inspect every signal.</h2>
+                  </div>
+                  <span className="small">
+                    {selectedDetectionCount} of {detections.length} selected
+                  </span>
+                </div>
+                <div className="object-grid">
+                  {detections.map((detection, index) => (
+                    <article
+                      key={detection.id}
+                      className="object-card"
+                      data-selected={detection.selected}
+                    >
+                      <button
+                        type="button"
+                        className="object-crop"
+                        onClick={() =>
+                          setDetections((items) =>
+                            items.map((item) =>
+                              item.id === detection.id
+                                ? { ...item, selected: !item.selected }
+                                : item,
+                            ),
+                          )
+                        }
+                      >
+                        <Image
+                          unoptimized
+                          width={424}
+                          height={424}
+                          src={detection.image}
+                          alt={`Mapped object ${index + 1}`}
+                        />
+                        <span>{String(index + 1).padStart(2, '0')}</span>
+                        <i>{detection.selected ? 'Included' : 'Excluded'}</i>
+                      </button>
+                      <div>
+                        <span>OBJECT {String(index + 1).padStart(2, '0')}</span>
+                        {detection.inference ? (
+                          <>
+                            <strong>
+                              {detection.inference.label[0].toUpperCase() +
+                                detection.inference.label.slice(1)}
+                            </strong>
+                            <small>
+                              {detection.inference.model === 'trained'
+                                ? 'GZ2-trained 450M'
+                                : 'Base 450M zero-shot'}{' '}
+                              · {duration(detection.inference.latencyMs)}
+                            </small>
+                          </>
+                        ) : detection.error ? (
+                          <>
+                            <strong>Scan failed</strong>
+                            <small>{detection.error}</small>
+                          </>
+                        ) : (
+                          <>
+                            <strong>Ready for morphology</strong>
+                            <small>Bounding box proposed by the base VLM</small>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <p className="small">
+                  Boxes are visual-grounding predictions, not catalog-confirmed
+                  objects. Click a box or crop to include or exclude it.
+                </p>
+              </section>
+            )}
+            {upload && observationMode === 'single' && inference && (
               <section className="candidate-section">
                 <div className="section-heading">
                   <div>
                     <div className="eyebrow">
-                      {inference ? `${inference.label.toUpperCase()} / ` : ''}
-                      {catalog.length} REFERENCE IMAGES
+                      {inference.label.toUpperCase()} / {catalog.length}{' '}
+                      REFERENCE IMAGES
                     </div>
-                    <h2>
-                      {inference
-                        ? 'Morphology-matched candidates'
-                        : 'Closest visual candidates'}
-                    </h2>
+                    <h2>Morphology-matched candidates</h2>
                   </div>
                   <span className="small">
-                    {inference
-                      ? 'Model category, then visual ranking'
-                      : 'Visual ranking while inference is pending'}
+                    Model category, then visual ranking
                   </span>
                 </div>
                 <div className="candidate-grid">
@@ -1157,42 +1931,46 @@ export default function Home() {
                 </p>
               </section>
             )}
-            {upload && inference?.model === 'trained' && (
-              <section className="morphology-brief">
-                <div>
-                  <div className="eyebrow">
-                    TRAINED CHECKPOINT / INTERPRETATION
+            {upload &&
+              observationMode === 'single' &&
+              inference?.model === 'trained' && (
+                <section className="morphology-brief">
+                  <div>
+                    <div className="eyebrow">
+                      TRAINED CHECKPOINT / INTERPRETATION
+                    </div>
+                    <h2>{MORPHOLOGY_GUIDE[inference.label].title}</h2>
+                    <p>{MORPHOLOGY_GUIDE[inference.label].summary}</p>
+                    <strong>What to inspect next</strong>
+                    <p>{MORPHOLOGY_GUIDE[inference.label].lookFor}</p>
                   </div>
-                  <h2>{MORPHOLOGY_GUIDE[inference.label].title}</h2>
-                  <p>{MORPHOLOGY_GUIDE[inference.label].summary}</p>
-                  <strong>What to inspect next</strong>
-                  <p>{MORPHOLOGY_GUIDE[inference.label].lookFor}</p>
-                </div>
-                <aside>
-                  <span>How the five candidates were found</span>
-                  <ol>
-                    <li>
-                      The trained 450M checkpoint assigns the upload to spiral
-                      or elliptical-looking morphology.
-                    </li>
-                    <li>The archive is filtered to that Galaxy Zoo branch.</li>
-                    <li>
-                      A compact grayscale image descriptor ranks visual
-                      similarity.
-                    </li>
-                  </ol>
-                  <p>
-                    Select a candidate to open its detailed field record: SDSS
-                    identifier, sky coordinates, volunteer vote counts, and
-                    classification notes.
-                  </p>
-                  <div className="unknown-note">
-                    <b>{MORPHOLOGY_GUIDE.unknown.title}</b>
-                    <span>{MORPHOLOGY_GUIDE.unknown.summary}</span>
-                  </div>
-                </aside>
-              </section>
-            )}
+                  <aside>
+                    <span>How the five candidates were found</span>
+                    <ol>
+                      <li>
+                        The trained 450M checkpoint assigns the upload to spiral
+                        or elliptical-looking morphology.
+                      </li>
+                      <li>
+                        The archive is filtered to that Galaxy Zoo branch.
+                      </li>
+                      <li>
+                        A compact grayscale image descriptor ranks visual
+                        similarity.
+                      </li>
+                    </ol>
+                    <p>
+                      Select a candidate to open its detailed field record: SDSS
+                      identifier, sky coordinates, volunteer vote counts, and
+                      classification notes.
+                    </p>
+                    <div className="unknown-note">
+                      <b>{MORPHOLOGY_GUIDE.unknown.title}</b>
+                      <span>{MORPHOLOGY_GUIDE.unknown.summary}</span>
+                    </div>
+                  </aside>
+                </section>
+              )}
             <section className="library" ref={library}>
               <div className="section-heading">
                 <div>
@@ -1218,6 +1996,7 @@ export default function Home() {
                   <button
                     key={g.id}
                     className={`archive-item ${active?.id === g.id && !upload ? 'selected' : ''}`}
+                    disabled={scanning || detecting || classifyingAll}
                     onClick={() => choose(g)}
                   >
                     <div>

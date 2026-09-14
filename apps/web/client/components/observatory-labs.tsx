@@ -37,10 +37,20 @@ export type LearningExample = {
   id: string;
   image: string;
   sourceName: string;
-  prediction: 'spiral' | 'elliptical';
+  task?: 'morphology' | 'grounding';
+  prediction: string;
   humanLabel?: 'spiral' | 'elliptical';
-  verdict: 'confirmed' | 'corrected' | 'uncertain' | 'stress-failure';
+  verdict:
+    | 'confirmed'
+    | 'corrected'
+    | 'uncertain'
+    | 'stress-failure'
+    | 'grounding-confirmed'
+    | 'grounding-corrected'
+    | 'grounding-uncertain';
   transformation?: string;
+  predictedBoxes?: Array<[number, number, number, number]>;
+  correctedBoxes?: Array<[number, number, number, number]>;
   checkpoint: ModelChoice;
   createdAt: string;
 };
@@ -193,7 +203,7 @@ export function StressLab({
     : 0;
   const stability =
     baseline && completed ? Math.round((stable / completed) * 100) : null;
-  const failures = baseline
+  const labelFlips = baseline
     ? results.filter(
         (result) =>
           result.id !== 'original' &&
@@ -256,11 +266,11 @@ export function StressLab({
     setMessage(`${result.name} added to the learning queue.`);
   }
 
-  async function queueAllFailures() {
-    for (const result of failures) await queueFailure(result);
-    if (failures.length)
+  async function queueAllLabelFlips() {
+    for (const result of labelFlips) await queueFailure(result);
+    if (labelFlips.length)
       setMessage(
-        `${failures.length} hard examples added to the learning queue.`,
+        `${labelFlips.length} label flips added to the learning queue.`,
       );
   }
 
@@ -418,13 +428,18 @@ export function StressLab({
                     ? `${stable} of ${completed} completed views retained the original classification. This measures consistency, not confidence.`
                     : `${completed} transformed views completed, but the original timed out. Run the sequence again to establish a stability reference.`}
                 </p>
-                <Button
-                  variant="outline"
-                  disabled={!failures.length}
-                  onClick={() => void queueAllFailures()}
-                >
-                  <Sparkles size={15} /> Add {failures.length || 'no'} failures
-                </Button>
+                {labelFlips.length ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => void queueAllLabelFlips()}
+                  >
+                    <Sparkles size={15} /> Add {labelFlips.length} label{' '}
+                    {labelFlips.length === 1 ? 'flip' : 'flips'} to learning
+                    queue
+                  </Button>
+                ) : (
+                  <span className="no-label-flips">No label flips to add</span>
+                )}
               </div>
               <div className="stress-grid">
                 {results.map((result) => {
@@ -469,7 +484,7 @@ export function StressLab({
                         )}
                         {changed && (
                           <button onClick={() => void queueFailure(result)}>
-                            Add hard example <ArrowRight size={13} />
+                            Add label flip <ArrowRight size={13} />
                           </button>
                         )}
                       </div>
@@ -538,7 +553,12 @@ export function LearningLoop({
       corrected: queue.filter((item) => item.verdict === 'corrected').length,
       uncertain: queue.filter((item) => item.verdict === 'uncertain').length,
       hard: queue.filter((item) => item.verdict === 'stress-failure').length,
-      confirmed: queue.filter((item) => item.verdict === 'confirmed').length,
+      confirmed: queue.filter(
+        (item) =>
+          item.verdict === 'confirmed' ||
+          item.verdict === 'grounding-confirmed',
+      ).length,
+      grounding: queue.filter((item) => item.task === 'grounding').length,
     }),
     [queue],
   );
@@ -570,6 +590,7 @@ export function LearningLoop({
             <span>{counts.hard} hard examples</span>
             <span>{counts.uncertain} uncertain</span>
             <span>{counts.confirmed} confirmed</span>
+            <span>{counts.grounding} box annotations</span>
           </div>
         </div>
         <div className="policy-card">
@@ -690,21 +711,38 @@ export function LearningLoop({
           <div className="inbox-grid">
             {queue.map((item) => (
               <article key={item.id}>
-                <Image
-                  unoptimized
-                  width={260}
-                  height={260}
-                  src={item.image}
-                  alt={item.sourceName}
-                />
+                <div className="inbox-preview">
+                  <Image
+                    unoptimized
+                    width={260}
+                    height={260}
+                    src={item.image}
+                    alt={item.sourceName}
+                  />
+                  {item.task === 'grounding' &&
+                    (item.correctedBoxes || item.predictedBoxes || []).map(
+                      ([x1, y1, x2, y2], index) => (
+                        <span
+                          key={`${item.id}-box-${index}`}
+                          style={{
+                            left: `${x1 * 100}%`,
+                            top: `${y1 * 100}%`,
+                            width: `${(x2 - x1) * 100}%`,
+                            height: `${(y2 - y1) * 100}%`,
+                          }}
+                        />
+                      ),
+                    )}
+                </div>
                 <div>
                   <span className="eyebrow">
                     {item.verdict.replace('-', ' ')}
                   </span>
                   <h3>{item.sourceName}</h3>
                   <p>
-                    Model: {item.prediction}
-                    {item.humanLabel ? ` · target: ${item.humanLabel}` : ''}
+                    {item.task === 'grounding'
+                      ? `Model: ${item.predictedBoxes?.length || 0} boxes${item.correctedBoxes ? ` · target: ${item.correctedBoxes.length} boxes` : ''}`
+                      : `Model: ${item.prediction}${item.humanLabel ? ` · target: ${item.humanLabel}` : ''}`}
                   </p>
                   {item.transformation && <small>{item.transformation}</small>}
                   <button onClick={() => onRemove(item.id)}>Remove</button>
