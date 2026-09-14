@@ -6,6 +6,13 @@ model or a morphology-tuned checkpoint, and compare the result. Successful
 classifications can be saved as collectible field-journal cards with nearby
 reference images.
 
+The project is a playful take on Galaxy Zoo and related citizen-astronomy
+challenges. It explores how effectively a compact 450M vision-language model can
+be specialized for a focused scientific task while making its inference speed,
+latency, and throughput visible. It also considers a longer-term possibility:
+running capable small models closer to where observations are made, including
+smart telescopes and future space-observation pipelines.
+
 The current classifier answers one deliberately narrow question: does the
 central galaxy look **spiral** or **elliptical**? The answer describes visible
 morphology. It does not identify a unique astronomical object, establish a
