@@ -24,6 +24,8 @@ physical galaxy type, or replace scientific analysis.
 - Per-request latency, time-to-first-token, decode time, and token counts
 - Galaxy Zoo 2 vote summaries for known reference objects
 - Five morphology-filtered visual candidates for further inspection
+- Morphology stress tests across rotation, dimming, noise, compression, and crop
+- Browser-local human feedback queue and checkpoint-approval pipeline preview
 - Browser-local field journal with JSON export
 - Optional shuffle across a locally prepared 239,000-object catalog
 
@@ -92,6 +94,13 @@ claims that the uploaded galaxy is the same astronomical object. Object IDs,
 coordinates, vote summaries, and descriptions come from the reference catalog;
 the vision model supplies the morphology label. Saved cards remain in browser
 local storage.
+
+The Stress Lab deliberately reruns the selected model over transformed versions
+of one observation and reports label stability. Confirmed classifications,
+human corrections, uncertain cases, and stress-test failures can be added to a
+browser-local learning queue. The Learning Loop visualizes validation, dataset
+snapshotting, training, evaluation, and promotion stages. Its progress displays
+are explicitly simulated and do not submit cloud training jobs.
 
 ## Run locally
 

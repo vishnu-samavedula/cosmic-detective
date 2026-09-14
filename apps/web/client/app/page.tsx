@@ -17,6 +17,8 @@ import {
   Minus,
   BookOpen,
   RefreshCw,
+  FlaskConical,
+  BrainCircuit,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -28,6 +30,14 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  LearningLoop,
+  StressLab,
+  makeObservationPreview,
+  type LabInference,
+  type LearningExample,
+  type ModelChoice,
+} from '@/components/observatory-labs';
 
 type Galaxy = {
   id: string;
@@ -60,19 +70,9 @@ type Card = {
   candidateIds?: string[];
 };
 type Candidate = { galaxy: Galaxy; exact: boolean; distance: number };
-type ModelChoice = 'base' | 'trained';
-type Inference = {
-  label: 'spiral' | 'elliptical';
-  model: ModelChoice;
-  modelName: string;
-  latencyMs: number;
-  ttftMs: number | null;
-  decodeMs: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  tokensPerSecond: number | null;
-};
+type Inference = LabInference;
 const KEY = 'cosmic-detective-collection-v1';
+const LEARNING_KEY = 'cosmic-detective-learning-queue-v1';
 const MORPHOLOGY_GUIDE = {
   spiral: {
     title: 'Spiral structure',
@@ -113,6 +113,7 @@ export default function Home() {
     [detail, setDetail] = useState<Galaxy | null>(null),
     [journalDetail, setJournalDetail] = useState<Card | null>(null),
     [cards, setCards] = useState<Card[]>([]),
+    [learningQueue, setLearningQueue] = useState<LearningExample[]>([]),
     [ready, setReady] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
@@ -177,6 +178,21 @@ export default function Home() {
           'Your saved collection could not be read. New observations can still be collected.',
         );
       }
+      try {
+        const feedback = JSON.parse(localStorage.getItem(LEARNING_KEY) || '[]');
+        if (Array.isArray(feedback))
+          setLearningQueue(
+            feedback.filter(
+              (item) =>
+                item &&
+                typeof item.id === 'string' &&
+                typeof item.image === 'string' &&
+                typeof item.sourceName === 'string',
+            ),
+          );
+      } catch {
+        setError('The learning queue could not be read from this browser.');
+      }
       setReady(true);
     });
   }, []);
@@ -192,6 +208,18 @@ export default function Home() {
       );
     }
   }, [cards, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      localStorage.setItem(LEARNING_KEY, JSON.stringify(learningQueue));
+    } catch {
+      queueMicrotask(() =>
+        setError(
+          'Browser storage is full. Remove learning examples before adding more.',
+        ),
+      );
+    }
+  }, [learningQueue, ready]);
   useEffect(() => {
     const context = (
       document as Document & {
@@ -598,6 +626,47 @@ export default function Home() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  async function reviewInference(
+    verdict: 'confirmed' | 'corrected' | 'uncertain',
+  ) {
+    if (!shown || !inference) return;
+    try {
+      const sourceId = upload?.hash || active?.hash;
+      if (!sourceId) return;
+      const id = `review-${sourceId}-${inference.model}`;
+      const preview = await makeObservationPreview(shown);
+      const example: LearningExample = {
+        id,
+        image: preview,
+        sourceName: upload?.name || active?.name || 'Observation',
+        prediction: inference.label,
+        humanLabel:
+          verdict === 'corrected'
+            ? inference.label === 'spiral'
+              ? 'elliptical'
+              : 'spiral'
+            : verdict === 'confirmed'
+              ? inference.label
+              : undefined,
+        verdict,
+        checkpoint: inference.model,
+        createdAt: new Date().toISOString(),
+      };
+      setLearningQueue((items) => [
+        example,
+        ...items.filter((item) => item.id !== id),
+      ]);
+      setNotice(
+        verdict === 'confirmed'
+          ? 'Classification confirmed and added to the learning queue.'
+          : verdict === 'corrected'
+            ? 'Correction added to the learning queue.'
+            : 'Observation marked uncertain for human review.',
+      );
+    } catch {
+      setError('This observation could not be added to the learning queue.');
+    }
+  }
   const shown = upload?.image || active?.image;
   return (
     <main className="observatory">
@@ -614,6 +683,15 @@ export default function Home() {
           <TabsList className="main-tabs" variant="line">
             <TabsTrigger value="investigate">
               <Scan size={16} /> Investigate
+            </TabsTrigger>
+            <TabsTrigger value="stress">
+              <FlaskConical size={16} /> Stress Lab
+            </TabsTrigger>
+            <TabsTrigger value="learning">
+              <BrainCircuit size={16} /> Learning Loop{' '}
+              <span className="count">
+                {learningQueue.length.toString().padStart(2, '0')}
+              </span>
             </TabsTrigger>
             <TabsTrigger value="collection">
               <BookOpen size={16} /> Collection{' '}
@@ -913,6 +991,31 @@ export default function Home() {
                       </em>
                     </output>
                   )}
+                  {inference && (
+                    <div className="human-review">
+                      <span>Does this reading look right?</span>
+                      <div>
+                        <button
+                          onClick={() => void reviewInference('confirmed')}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => void reviewInference('corrected')}
+                        >
+                          Correct to{' '}
+                          {inference.label === 'spiral'
+                            ? 'elliptical'
+                            : 'spiral'}
+                        </button>
+                        <button
+                          onClick={() => void reviewInference('uncertain')}
+                        >
+                          Unsure
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="readout-row">
                   <span>{upload ? 'Morphology' : 'Catalog identifier'}</span>
@@ -1104,6 +1207,39 @@ export default function Home() {
               </div>
             </section>
           </section>
+        </TabsContent>
+        <TabsContent value="stress">
+          <StressLab
+            key={`${upload?.hash || active?.hash || 'empty'}-${modelChoice || 'none'}`}
+            observation={
+              shown
+                ? {
+                    image: shown,
+                    name: upload?.name || active?.name || 'Observation',
+                  }
+                : null
+            }
+            model={modelChoice}
+            available={Boolean(modelChoice && modelStatus[modelChoice])}
+            onInvestigate={() => setTab('investigate')}
+            onQueue={(example) =>
+              setLearningQueue((items) => [
+                example,
+                ...items.filter((item) => item.id !== example.id),
+              ])
+            }
+          />
+        </TabsContent>
+        <TabsContent value="learning">
+          <LearningLoop
+            queue={learningQueue}
+            onRemove={(id) =>
+              setLearningQueue((items) =>
+                items.filter((item) => item.id !== id),
+              )
+            }
+            onInvestigate={() => setTab('investigate')}
+          />
         </TabsContent>
         <TabsContent value="collection">
           <section className="collection">
