@@ -73,8 +73,9 @@ terms remain available on its model card.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph Preparation[Model preparation]
+        direction TB
         GZ2[Grounded GZ2 images and labels]
         LQH[LQH training harness]
         SFT[LQH Cloud GPU compute<br/>LoRA SFT and evaluation]
@@ -82,6 +83,7 @@ flowchart LR
     end
 
     subgraph Cloud[LQH Cloud]
+        direction TB
         Gateway[OpenAI-compatible<br/>inference gateway]
         Base[Base 450M deployment<br/>visual grounding and zero-shot morphology]
         Trained[GZ2-trained 450M deployment<br/>spiral or elliptical morphology]
@@ -91,6 +93,7 @@ flowchart LR
     end
 
     subgraph Server[Application server]
+        direction TB
         Detect[POST /api/detect<br/>base endpoint only]
         Classify[POST /api/classify<br/>selected endpoint]
         Secrets[Server-only endpoint names<br/>and inference key]
@@ -101,6 +104,7 @@ flowchart LR
     end
 
     subgraph Browser[Cosmic Detective browser]
+        direction TB
         Image[Upload or GZ2 image]
         Prepare[Validate and resize]
         Mode{Single or multi object}
@@ -120,6 +124,23 @@ flowchart LR
         Boxes --> Feedback
         Label --> Feedback
     end
+
+    classDef preparation fill:#10201b,stroke:#527d6b,color:#d8e7df,stroke-width:1px
+    classDef cloud fill:#17172a,stroke:#706b9c,color:#e1def2,stroke-width:1px
+    classDef server fill:#211b12,stroke:#8b7048,color:#eee1ca,stroke-width:1px
+    classDef browser fill:#101c22,stroke:#52717e,color:#dce8ec,stroke-width:1px
+    classDef decision fill:#241d13,stroke:#b08a50,color:#f0dfbd,stroke-width:1px
+
+    class GZ2,LQH,SFT preparation
+    class Gateway,Base,Trained cloud
+    class Detect,Classify,Secrets server
+    class Image,Prepare,Boxes,Crops,Label,Retrieval,Feedback,Journal browser
+    class Mode decision
+
+    style Preparation fill:#0b1512,stroke:#2f5143,color:#bcd4c8
+    style Cloud fill:#10101d,stroke:#48476c,color:#cfcae6
+    style Server fill:#16120c,stroke:#5f4d34,color:#ddc9a6
+    style Browser fill:#0a1216,stroke:#354f5a,color:#c7dbe2
 ```
 
 LQH is used in two places. During model preparation, the harness sends the
