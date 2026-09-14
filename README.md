@@ -1,9 +1,10 @@
 # Cosmic Detective
 
 Cosmic Detective is an experimental galaxy-morphology explorer. Choose a Galaxy
-Zoo image or upload an observation, run it through either a base 450M vision
-model or a morphology-tuned checkpoint, and compare the result. Successful
-classifications can be saved as collectible field-journal cards with nearby
+Zoo image or upload an observation, then inspect a central target or ask a
+compact vision-language model to map multiple objects across the field. The app
+can compare base and morphology-tuned checkpoints, collect human corrections,
+and save successful classifications as field-journal cards with nearby
 reference images.
 
 The project is a playful take on Galaxy Zoo and related citizen-astronomy
@@ -13,19 +14,26 @@ latency, and throughput visible. It also considers a longer-term possibility:
 running capable small models closer to where observations are made, including
 smart telescopes and future space-observation pipelines.
 
-The current classifier answers one deliberately narrow question: does the
-central galaxy look **spiral** or **elliptical**? The answer describes visible
-morphology. It does not identify a unique astronomical object, establish a
-physical galaxy type, or replace scientific analysis.
+The current morphology classifier answers one deliberately narrow question:
+does a selected galaxy crop look **spiral** or **elliptical**? In single-object
+mode that crop is the central target. In multi-object mode, the base model first
+proposes regions and the classifier reads each selected crop. These answers
+describe visible morphology. They do not identify a unique astronomical object,
+establish a physical galaxy type, or replace scientific analysis.
 
 ## Features
 
 - Explicit, user-triggered inference against base and tuned checkpoints
+- Single-object and multi-object observation modes
+- Zero-shot visual grounding with normalized, selectable bounding boxes
+- Two-stage multi-object inference: locate sources, then classify each crop
+- Human box correction through exclusion, manual drawing, and corner resizing
 - Per-request latency, time-to-first-token, decode time, and token counts
 - Galaxy Zoo 2 vote summaries for known reference objects
 - Five morphology-filtered visual candidates for further inspection
 - Morphology stress tests across rotation, dimming, noise, compression, and crop
-- Browser-local human feedback queue and checkpoint-approval pipeline preview
+- Browser-local morphology and grounding feedback queue
+- Checkpoint-approval and continual-learning pipeline preview
 - Browser-local field journal with JSON export
 - Optional shuffle across a locally prepared 239,000-object catalog
 
@@ -42,7 +50,7 @@ SigLIP2 NaFlex vision encoder.
 
 | Mode | Model | Purpose |
 | --- | --- | --- |
-| Base 450M | Original LFM2.5-VL-450M checkpoint | Zero-shot morphology baseline |
+| Base 450M | Original LFM2.5-VL-450M checkpoint | Zero-shot morphology and multi-object visual grounding |
 | Trained 450M | LoRA adapter post-trained over the same checkpoint | Galaxy Zoo 2 spiral/elliptical classification |
 
 The post-training corpus contains 12,000 balanced Galaxy Zoo 2 examples: 6,000
@@ -65,28 +73,43 @@ terms remain available on its model card.
 ## Architecture
 
 ```mermaid
-flowchart LR
-    A[Upload or choose a GZ2 image] --> B[Validate and resize in browser]
-    B --> C[SHA-256 and 16x16 visual descriptor]
-    B --> D[Server classification route]
-    D --> E{Selected endpoint}
-    E --> F[Base 450M]
-    E --> G[GZ2-trained 450M]
-    F --> H[spiral or elliptical]
-    G --> H
-    H --> I[Filter reference catalog by morphology]
-    C --> J[Rank candidates by visual distance]
-    I --> J
-    J --> K[Five nearby GZ2 references]
-    H --> L[Field-journal card]
-    K --> L
+flowchart TD
+    A[Upload or choose an image] --> B[Validate and resize in browser]
+    B --> C{Observation mode}
+
+    C -->|Single object| D[Selected base or trained endpoint]
+    D --> E[Spiral or elliptical]
+    E --> F[Filter and rank nearby GZ2 references]
+    F --> G[Field-journal card]
+
+    C -->|Multi object| H[Base 450M visual grounding]
+    H --> I[Normalized bounding boxes]
+    I --> J[Select, draw, or resize boxes]
+    J --> K[Crop each selected region]
+    K --> D
+
+    E --> L[Morphology feedback]
+    I --> M[Original model boxes]
+    J --> N[Corrected human boxes]
+    L --> O[Browser learning queue]
+    M --> O
+    N --> O
 ```
 
 The browser validates and downsizes the image before sending it through the
-application server. The chosen model returns exactly `spiral` or `elliptical`.
-That label filters a local Galaxy Zoo 2 reference catalog, and a small 16x16
-grayscale descriptor ranks candidates within the matching morphology. An exact
-SHA-256 match recognizes a reference image already present in the catalog.
+application server. Single-object inference sends the full observation to the
+chosen endpoint, which returns exactly `spiral` or `elliptical`. That label
+filters a local Galaxy Zoo 2 reference catalog, and a small 16x16 grayscale
+descriptor ranks candidates within the matching morphology. An exact SHA-256
+match recognizes a reference image already present in the catalog.
+
+Multi-object inference has two deliberate stages. First, the base 450M model is
+prompted for every visible galaxy candidate as a JSON array of bounding boxes
+normalized to `[0,1]`. The app draws those predictions and lets the observer
+exclude a region, add a square, or resize any box by its corners. Second, the app
+crops every selected region and sends the crops one at a time to the chosen base
+or trained morphology endpoint. Changing tabs does not interrupt this sequence.
+The boxes are model proposals rather than catalog-confirmed detections.
 
 The candidate ranker is a transparent image-distance heuristic, not a learned
 embedding model. Its five results are visually similar references rather than
@@ -97,10 +120,12 @@ local storage.
 
 The Stress Lab deliberately reruns the selected model over transformed versions
 of one observation and reports label stability. Confirmed classifications,
-human corrections, uncertain cases, and stress-test failures can be added to a
-browser-local learning queue. The Learning Loop visualizes validation, dataset
-snapshotting, training, evaluation, and promotion stages. Its progress displays
-are explicitly simulated and do not submit cloud training jobs.
+human corrections, uncertain cases, stress-test failures, and visual-grounding
+annotations can be added to a browser-local learning queue. A grounding record
+preserves both the original zero-shot boxes and the corrected target boxes. The
+Learning Loop visualizes validation, dataset snapshotting, training, evaluation,
+and promotion stages. Its progress displays are explicitly simulated and do not
+submit cloud training jobs.
 
 ## Run locally
 
@@ -126,6 +151,10 @@ Never expose the inference key through a browser-prefixed environment variable.
 Image uploads are resized in the browser and sent through the application server
 to the configured inference endpoint. The app does not persist uploads;
 collections stay in the browser's local storage.
+
+The base deployment also serves multi-object grounding. Development or debug
+deployments may scale down while idle, so the first streamed request can take
+longer than subsequent warm requests.
 
 ## Data
 
