@@ -73,28 +73,60 @@ terms remain available on its model card.
 ## Architecture
 
 ```mermaid
-flowchart TD
-    A[Upload or choose an image] --> B[Validate and resize in browser]
-    B --> C{Observation mode}
+flowchart LR
+    subgraph Preparation[Model preparation]
+        GZ2[Grounded GZ2 images and labels]
+        LQH[LQH training harness]
+        SFT[LQH Cloud GPU compute<br/>LoRA SFT and evaluation]
+        GZ2 --> LQH --> SFT
+    end
 
-    C -->|Single object| D[Selected base or trained endpoint]
-    D --> E[Spiral or elliptical]
-    E --> F[Filter and rank nearby GZ2 references]
-    F --> G[Field-journal card]
+    subgraph Cloud[LQH Cloud]
+        Gateway[OpenAI-compatible<br/>inference gateway]
+        Base[Base 450M deployment<br/>visual grounding and zero-shot morphology]
+        Trained[GZ2-trained 450M deployment<br/>spiral or elliptical morphology]
+        Gateway --> Base
+        Gateway --> Trained
+        SFT --> Trained
+    end
 
-    C -->|Multi object| H[Base 450M visual grounding]
-    H --> I[Normalized bounding boxes]
-    I --> J[Select, draw, or resize boxes]
-    J --> K[Crop each selected region]
-    K --> D
+    subgraph Server[Application server]
+        Detect[POST /api/detect<br/>base endpoint only]
+        Classify[POST /api/classify<br/>selected endpoint]
+        Secrets[Server-only endpoint names<br/>and inference key]
+        Secrets --> Detect
+        Secrets --> Classify
+        Detect --> Gateway
+        Classify --> Gateway
+    end
 
-    E --> L[Morphology feedback]
-    I --> M[Original model boxes]
-    J --> N[Corrected human boxes]
-    L --> O[Browser learning queue]
-    M --> O
-    N --> O
+    subgraph Browser[Cosmic Detective browser]
+        Image[Upload or GZ2 image]
+        Prepare[Validate and resize]
+        Mode{Single or multi object}
+        Boxes[Draw predicted boxes<br/>select, add, or resize]
+        Crops[Crop selected regions]
+        Label[Spiral or elliptical result]
+        Retrieval[Filter GZ2 catalog<br/>and rank visual candidates]
+        Feedback[Browser-local feedback<br/>original and corrected targets]
+        Journal[Field journal]
+
+        Image --> Prepare --> Mode
+        Mode -->|Single| Classify
+        Mode -->|Multi stage 1| Detect
+        Detect --> Boxes --> Crops
+        Crops -->|Multi stage 2| Classify
+        Classify --> Label --> Retrieval --> Journal
+        Boxes --> Feedback
+        Label --> Feedback
+    end
 ```
+
+LQH is used in two places. During model preparation, the harness sends the
+Galaxy Zoo 2 training recipe to LQH Cloud compute for LoRA post-training and
+evaluation. At runtime, the application server calls separately deployed base
+and trained models through the LQH Cloud OpenAI-compatible inference gateway.
+The inference key and deployment names remain server-side.
 
 The browser validates and downsizes the image before sending it through the
 application server. Single-object inference sends the full observation to the
