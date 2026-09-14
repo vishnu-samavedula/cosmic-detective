@@ -1,0 +1,1 @@
+Describe only the visible appearance of the central object in the supplied image. Answer in one short plain-English sentence. Be uncertain when details are unclear. Do not guess its name or physical properties.

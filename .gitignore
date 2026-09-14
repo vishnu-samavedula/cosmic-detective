@@ -1,0 +1,74 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies, build output, and tool state
+node_modules/
+dist/
+.vinext/
+.wrangler/
+.open-next/
+.next/
+coverage/
+*.tsbuildinfo
+.venv/
+.venv-*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+*.log
+*.part
+
+# Internal harness state and experiment records
+.lqh/
+.git-backups/
+runs/
+training/
+datasets/
+seed_data/
+test/
+tests/fixtures/
+
+# Local planning and retrospective notes
+SPEC.md
+NOTES.md
+cosmic-detective-spec.md
+*.local.md
+
+# Local design candidate; move into app assets after provenance is confirmed
+bground.jpg
+
+# Raw and generated astronomy data
+data/raw/*
+!data/raw/README.md
+data/processed/*
+!data/processed/README.md
+data/splits/*.json
+data/manifests/*
+!data/manifests/README.md
+apps/web/client/public/catalog.json
+apps/web/client/public/archive-pool.json.gz
+apps/web/client/public/galaxies/
+apps/web/client/public/gz2-all/
+
+# Generated reports and exports
+artifacts/design/
+artifacts/diagnostics/
+artifacts/evaluations/*
+!artifacts/evaluations/README.md
+artifacts/exports/*
+!artifacts/exports/README.md
+
+# Model weights and exports
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
+*.pt
+*.pth

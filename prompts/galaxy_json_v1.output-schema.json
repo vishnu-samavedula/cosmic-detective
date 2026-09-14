@@ -1,0 +1,95 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arms_winding",
+        "arms_number",
+        "appearance",
+        "roundness",
+        "edge_on",
+        "bar",
+        "spiral",
+        "bulge_prominence"
+      ],
+      "properties": {
+        "arms_winding": {
+          "enum": [
+            "tight",
+            "medium",
+            "loose",
+            null
+          ]
+        },
+        "arms_number": {
+          "enum": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "more_than_4",
+            "cant_tell",
+            null
+          ]
+        },
+        "appearance": {
+          "enum": [
+            "smooth",
+            "features_or_disk",
+            "star_or_artifact",
+            null
+          ]
+        },
+        "roundness": {
+          "enum": [
+            "completely_round",
+            "in_between",
+            "cigar_shaped",
+            null
+          ]
+        },
+        "edge_on": {
+          "enum": [
+            "yes",
+            "no",
+            null
+          ]
+        },
+        "bar": {
+          "enum": [
+            "yes",
+            "no",
+            null
+          ]
+        },
+        "spiral": {
+          "enum": [
+            "yes",
+            "no",
+            null
+          ]
+        },
+        "bulge_prominence": {
+          "enum": [
+            "none",
+            "just_noticeable",
+            "obvious",
+            "dominant",
+            null
+          ]
+        }
+      }
+    }
+  }
+}

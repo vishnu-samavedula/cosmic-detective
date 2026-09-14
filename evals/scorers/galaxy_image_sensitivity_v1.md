@@ -1,0 +1,1 @@
+Judge whether the answer describes the central object in the attached image. Score 1-10 for visible shape and orientation accuracy, relevance, and appropriate uncertainty. Do not require JSON or a particular phrase. Penalize unsupported features. The reference is a noisy catalog-derived hint, not definitive ground truth. Return a JSON object with score and reasoning.
