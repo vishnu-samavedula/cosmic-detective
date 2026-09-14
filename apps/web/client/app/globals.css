@@ -1087,6 +1087,19 @@ footer a:last-child {
   border-color: var(--primary);
   color: var(--primary);
 }
+.human-review-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #44604d;
+  background: #0c1711;
+  color: #a9c8b1;
+  font:
+    11px/1.4 var(--font-geist-mono),
+    monospace;
+}
 
 .lab-page {
   min-height: 70vh;
@@ -1505,62 +1518,6 @@ footer a:last-child {
   grid-template-columns: 1fr 1fr;
   gap: 22px;
 }
-.training-handoff {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(260px, 0.75fr);
-  gap: 18px 28px;
-  margin-top: 22px;
-  padding: 24px;
-  border: 1px solid #4d4433;
-  background: #13150f;
-}
-.handoff-copy {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-}
-.handoff-copy > svg {
-  margin-top: 2px;
-  color: var(--primary);
-}
-.handoff-copy h3 {
-  margin: 7px 0;
-}
-.handoff-copy p {
-  color: #9ca8ae;
-  font-size: 13px;
-  line-height: 1.55;
-}
-.training-handoff pre {
-  margin: 0;
-  padding: 17px;
-  overflow-x: auto;
-  border: 1px solid #38444a;
-  background: #060a0c;
-  color: #e4d7bd;
-  font:
-    13px/1.65 var(--font-geist-mono),
-    monospace;
-}
-.training-handoff code span {
-  color: #77868d;
-}
-.handoff-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-  grid-column: 1 / -1;
-}
-.handoff-actions button {
-  border-color: #554c3b !important;
-  color: #dfd6c5 !important;
-}
-.training-handoff > small {
-  grid-column: 1 / -1;
-  color: #77858c;
-  font-size: 11px;
-  line-height: 1.5;
-}
 .training-run {
   padding: 24px;
   border: 1px solid var(--border);
@@ -1699,14 +1656,6 @@ footer a:last-child {
   .loop-overview,
   .run-grid {
     grid-template-columns: 1fr;
-  }
-  .training-handoff {
-    grid-template-columns: 1fr;
-  }
-  .training-handoff pre,
-  .handoff-actions,
-  .training-handoff > small {
-    grid-column: 1;
   }
   .stress-source,
   .queue-summary {

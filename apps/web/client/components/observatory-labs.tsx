@@ -8,8 +8,6 @@ import {
   Check,
   CheckCircle2,
   Circle,
-  Copy,
-  FileJson,
   FlaskConical,
   Gauge,
   LoaderCircle,
@@ -17,7 +15,6 @@ import {
   ShieldCheck,
   Sparkles,
   Telescope,
-  Terminal,
   TriangleAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -515,7 +512,6 @@ export function LearningLoop({
   const [generationTwo, setGenerationTwo] = useState(68);
   const [generationThree, setGenerationThree] = useState(0);
   const [approved, setApproved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const reviewed = 74 + queue.length;
   const automaticallyApproved = policy === 'automatic' && reviewed >= 100;
   const trainingStarted = approved || automaticallyApproved;
@@ -546,32 +542,6 @@ export function LearningLoop({
     }),
     [queue],
   );
-
-  async function copyHandoff() {
-    await navigator.clipboard.writeText('lqh\n/train');
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  }
-
-  function exportReviewManifest() {
-    const manifest = {
-      schema_version: 1,
-      created_at: new Date().toISOString(),
-      source_checkpoint: 'GZ2 Gen 01 / LFM2.5-VL-450M',
-      status: trainingStarted ? 'approved' : 'draft',
-      records: queue,
-    };
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(manifest, null, 2)], {
-        type: 'application/json',
-      }),
-    );
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'cosmic-learning-review-manifest.json';
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
 
   return (
     <section className="lab-page learning-page">
@@ -641,8 +611,9 @@ export function LearningLoop({
             {trainingStarted ? 'Snapshot approved' : 'Approve current snapshot'}
           </Button>
           <small>
-            Pipeline controls are a local preview. No cloud job is submitted
-            from this screen.
+            LQH <code>/train</code> is triggered according to the continual
+            learning policy configured in the LQH console. This screen is a
+            preview and does not submit a cloud job.
           </small>
         </div>
       </div>
@@ -692,43 +663,6 @@ export function LearningLoop({
             ]}
             staging={!trainingStarted}
           />
-        </div>
-        <div className="training-handoff">
-          <div className="handoff-copy">
-            <Terminal size={20} />
-            <div>
-              <span className="eyebrow">OPERATOR HANDOFF</span>
-              <h3>Continue in the internal training harness</h3>
-              <p>
-                Export the reviewed evidence, materialize the approved image
-                dataset in the project, then start the training skill from its
-                terminal workspace.
-              </p>
-            </div>
-          </div>
-          <pre>
-            <code>
-              <span># From the prepared project directory</span>
-              {'\n'}lqh{'\n'}/train
-            </code>
-          </pre>
-          <div className="handoff-actions">
-            <Button variant="outline" onClick={() => void copyHandoff()}>
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-              {copied ? 'Copied' : 'Copy handoff'}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!queue.length}
-              onClick={exportReviewManifest}
-            >
-              <FileJson size={15} /> Export review manifest
-            </Button>
-          </div>
-          <small>
-            This screen prepares review metadata only. The CLI command is shown
-            for the operator and is never executed by the browser.
-          </small>
         </div>
       </section>
 

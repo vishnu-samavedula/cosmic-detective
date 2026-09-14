@@ -130,11 +130,14 @@ export default function Home() {
     [modelChoice, setModelChoice] = useState<ModelChoice | null>(null),
     [modelStatus, setModelStatus] = useState({ base: false, trained: false }),
     [inference, setInference] = useState<Inference | null>(null),
+    [reviewedInference, setReviewedInference] = useState(false),
+    [reviewConfirmation, setReviewConfirmation] = useState(''),
     [limit, setLimit] = useState(5),
     [zoom, setZoom] = useState(1);
   const input = useRef<HTMLInputElement>(null);
   const library = useRef<HTMLDivElement>(null);
   const fullArchive = useRef<Galaxy[] | null>(null);
+  const reviewTimer = useRef<number | null>(null);
   useEffect(() => {
     fetch('/catalog.json')
       .then((r) => {
@@ -282,6 +285,12 @@ export default function Home() {
     });
     return () => lifecycle.abort();
   }, [catalog]);
+  function resetReview() {
+    if (reviewTimer.current) window.clearTimeout(reviewTimer.current);
+    reviewTimer.current = null;
+    setReviewedInference(false);
+    setReviewConfirmation('');
+  }
   function collect(g: Galaxy | null) {
     const id = g?.id || upload?.hash;
     if (!id) return;
@@ -343,6 +352,7 @@ export default function Home() {
     setModelChoice(null);
     setCandidates([]);
     setInference(null);
+    resetReview();
     setZoom(1);
     setNotice('');
     setTab('investigate');
@@ -509,6 +519,7 @@ export default function Home() {
     setError('');
     setNotice('');
     setInference(null);
+    resetReview();
     try {
       const inferenceImage = await asInferenceImage(image);
       const rankingDescriptor =
@@ -595,6 +606,7 @@ export default function Home() {
       setActive(null);
       setModelChoice(null);
       setInference(null);
+      resetReview();
       setCandidates(rankCandidates(d, hash));
       setNotice('Observation ready. Choose a model, then run inference.');
     } catch (e) {
@@ -656,6 +668,19 @@ export default function Home() {
         example,
         ...items.filter((item) => item.id !== id),
       ]);
+      setReviewedInference(true);
+      setReviewConfirmation(
+        verdict === 'confirmed'
+          ? `Saved as confirmed · target ${inference.label}`
+          : verdict === 'corrected'
+            ? `Correction saved · target ${example.humanLabel}`
+            : 'Saved for human review · no target assigned',
+      );
+      if (reviewTimer.current) window.clearTimeout(reviewTimer.current);
+      reviewTimer.current = window.setTimeout(() => {
+        setReviewConfirmation('');
+        reviewTimer.current = null;
+      }, 2200);
       setNotice(
         verdict === 'confirmed'
           ? 'Classification confirmed and added to the learning queue.'
@@ -884,6 +909,7 @@ export default function Home() {
                       if (value) {
                         setModelChoice(value as ModelChoice);
                         setInference(null);
+                        resetReview();
                         setNotice('Model selected. Run inference when ready.');
                       }
                     }}
@@ -991,7 +1017,7 @@ export default function Home() {
                       </em>
                     </output>
                   )}
-                  {inference && (
+                  {inference && !reviewedInference && (
                     <div className="human-review">
                       <span>Does this reading look right?</span>
                       <div>
@@ -1015,6 +1041,11 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+                  )}
+                  {inference && reviewedInference && reviewConfirmation && (
+                    <output className="human-review-confirmation">
+                      <Check size={15} /> {reviewConfirmation}
+                    </output>
                   )}
                 </div>
                 <div className="readout-row">
