@@ -1208,7 +1208,7 @@ export default function Home() {
             </section>
           </section>
         </TabsContent>
-        <TabsContent value="stress">
+        <TabsContent value="stress" keepMounted>
           <StressLab
             key={`${upload?.hash || active?.hash || 'empty'}-${modelChoice || 'none'}`}
             observation={
@@ -1230,7 +1230,7 @@ export default function Home() {
             }
           />
         </TabsContent>
-        <TabsContent value="learning">
+        <TabsContent value="learning" keepMounted>
           <LearningLoop
             queue={learningQueue}
             onRemove={(id) =>

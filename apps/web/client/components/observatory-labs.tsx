@@ -8,6 +8,8 @@ import {
   Check,
   CheckCircle2,
   Circle,
+  Copy,
+  FileJson,
   FlaskConical,
   Gauge,
   LoaderCircle,
@@ -15,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   Telescope,
+  Terminal,
   TriangleAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -170,6 +173,18 @@ export function StressLab({
   const [running, setRunning] = useState(false);
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState('');
+  const [selectedVariants, setSelectedVariants] = useState(
+    VARIANTS.slice(1).map((variant) => variant.id),
+  );
+  const sequence = useMemo(
+    () => [
+      VARIANTS[0],
+      ...VARIANTS.slice(1).filter((variant) =>
+        selectedVariants.includes(variant.id),
+      ),
+    ],
+    [selectedVariants],
+  );
 
   const baseline = results.find(
     (result) => result.id === 'original',
@@ -195,8 +210,8 @@ export function StressLab({
     setRunning(true);
     setResults([]);
     setMessage('');
-    for (let index = 0; index < VARIANTS.length; index += 1) {
-      const variant = VARIANTS[index];
+    for (let index = 0; index < sequence.length; index += 1) {
+      const variant = sequence[index];
       setStep(index + 1);
       try {
         const image = await transformObservation(observation.image, variant.id);
@@ -214,6 +229,17 @@ export function StressLab({
       }
     }
     setRunning(false);
+  }
+
+  function updateSelection(next: string[]) {
+    setSelectedVariants(next);
+    setResults([]);
+    setStep(0);
+    setMessage(
+      next.length
+        ? 'Stress plan updated. Run the sequence when ready.'
+        : 'Choose at least one stress category.',
+    );
   }
 
   async function queueFailure(result: StressResult) {
@@ -298,7 +324,9 @@ export function StressLab({
               </p>
               <Button
                 className="primary-action"
-                disabled={running || !available}
+                disabled={
+                  running || !available || selectedVariants.length === 0
+                }
                 onClick={() => void run()}
               >
                 {running ? (
@@ -307,7 +335,7 @@ export function StressLab({
                   <Play size={16} />
                 )}
                 {running
-                  ? `Scanning ${step} of ${VARIANTS.length}`
+                  ? `Scanning ${step} of ${sequence.length}`
                   : results.length
                     ? 'Run sequence again'
                     : 'Run stress sequence'}
@@ -318,11 +346,63 @@ export function StressLab({
             </div>
           </div>
 
+          <fieldset className="stress-categories" disabled={running}>
+            <div className="category-heading">
+              <div>
+                <legend>Choose stress categories</legend>
+                <span>
+                  The original reference always runs before selected tests.
+                </span>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateSelection(
+                      VARIANTS.slice(1).map((variant) => variant.id),
+                    )
+                  }
+                >
+                  Select all
+                </button>
+                <button type="button" onClick={() => updateSelection([])}>
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="category-grid">
+              {VARIANTS.slice(1).map((variant) => (
+                <label
+                  aria-label={variant.name}
+                  htmlFor={`stress-${variant.id}`}
+                  key={variant.id}
+                >
+                  <input
+                    id={`stress-${variant.id}`}
+                    type="checkbox"
+                    checked={selectedVariants.includes(variant.id)}
+                    onChange={(event) =>
+                      updateSelection(
+                        event.target.checked
+                          ? [...selectedVariants, variant.id]
+                          : selectedVariants.filter((id) => id !== variant.id),
+                      )
+                    }
+                  />
+                  <span>
+                    <strong>{variant.name}</strong>
+                    <small>{variant.note}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
           {(running || results.length > 0) && (
             <div className="sequence-progress" aria-live="polite">
               <span
                 style={{
-                  width: `${running ? ((step - 1) / VARIANTS.length) * 100 : 100}%`,
+                  width: `${running ? ((step - 1) / sequence.length) * 100 : 100}%`,
                 }}
               />
             </div>
@@ -435,6 +515,7 @@ export function LearningLoop({
   const [generationTwo, setGenerationTwo] = useState(68);
   const [generationThree, setGenerationThree] = useState(0);
   const [approved, setApproved] = useState(false);
+  const [copied, setCopied] = useState(false);
   const reviewed = 74 + queue.length;
   const automaticallyApproved = policy === 'automatic' && reviewed >= 100;
   const trainingStarted = approved || automaticallyApproved;
@@ -465,6 +546,32 @@ export function LearningLoop({
     }),
     [queue],
   );
+
+  async function copyHandoff() {
+    await navigator.clipboard.writeText('lqh\n/train');
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  function exportReviewManifest() {
+    const manifest = {
+      schema_version: 1,
+      created_at: new Date().toISOString(),
+      source_checkpoint: 'GZ2 Gen 01 / LFM2.5-VL-450M',
+      status: trainingStarted ? 'approved' : 'draft',
+      records: queue,
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(manifest, null, 2)], {
+        type: 'application/json',
+      }),
+    );
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'cosmic-learning-review-manifest.json';
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   return (
     <section className="lab-page learning-page">
@@ -585,6 +692,43 @@ export function LearningLoop({
             ]}
             staging={!trainingStarted}
           />
+        </div>
+        <div className="training-handoff">
+          <div className="handoff-copy">
+            <Terminal size={20} />
+            <div>
+              <span className="eyebrow">OPERATOR HANDOFF</span>
+              <h3>Continue in the internal training harness</h3>
+              <p>
+                Export the reviewed evidence, materialize the approved image
+                dataset in the project, then start the training skill from its
+                terminal workspace.
+              </p>
+            </div>
+          </div>
+          <pre>
+            <code>
+              <span># From the prepared project directory</span>
+              {'\n'}lqh{'\n'}/train
+            </code>
+          </pre>
+          <div className="handoff-actions">
+            <Button variant="outline" onClick={() => void copyHandoff()}>
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              {copied ? 'Copied' : 'Copy handoff'}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!queue.length}
+              onClick={exportReviewManifest}
+            >
+              <FileJson size={15} /> Export review manifest
+            </Button>
+          </div>
+          <small>
+            This screen prepares review metadata only. The CLI command is shown
+            for the operator and is never executed by the browser.
+          </small>
         </div>
       </section>
 
