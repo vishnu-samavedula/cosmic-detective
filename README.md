@@ -24,6 +24,68 @@ Inference is connected through internal harness tooling. Public integration
 guidance is coming soon; the server route currently expects an OpenAI-compatible
 vision chat-completions endpoint.
 
+## Models
+
+Both sides of the comparison use
+[LiquidAI/LFM2.5-VL-450M](https://huggingface.co/LiquidAI/LFM2.5-VL-450M), a
+compact vision-language model with an LFM2.5-350M language backbone and an 86M
+SigLIP2 NaFlex vision encoder.
+
+| Mode | Model | Purpose |
+| --- | --- | --- |
+| Base 450M | Original LFM2.5-VL-450M checkpoint | Zero-shot morphology baseline |
+| Trained 450M | LoRA adapter post-trained over the same checkpoint | Galaxy Zoo 2 spiral/elliptical classification |
+
+The post-training corpus contains 12,000 balanced Galaxy Zoo 2 examples: 6,000
+spiral and 6,000 elliptical. Each example pairs a galaxy image and classification
+instruction with one expected lowercase label. The labels are grounded in the
+top-level Galaxy Zoo 2 volunteer vote tree. The SFT recipe used three epochs, an
+effective batch size of 16, a learning rate of `5e-4`, and LoRA rank 8.
+
+On the same frozen, object-disjoint set of 400 images, the base model scored
+7.79/10 and the post-trained model scored 9.98/10 using unconstrained decoding
+and the same vision-judge protocol. These scores measure agreement with the
+requested label and output format under this experiment. They are not calibrated
+probabilities, scientific accuracy claims, or evidence that the model can
+identify a unique catalog object.
+
+The app connects to separately configured base and trained serving endpoints.
+It does not ship or download either checkpoint. The model's own license and use
+terms remain available on its model card.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Upload or choose a GZ2 image] --> B[Validate and resize in browser]
+    B --> C[SHA-256 and 16x16 visual descriptor]
+    B --> D[Server classification route]
+    D --> E{Selected endpoint}
+    E --> F[Base 450M]
+    E --> G[GZ2-trained 450M]
+    F --> H[spiral or elliptical]
+    G --> H
+    H --> I[Filter reference catalog by morphology]
+    C --> J[Rank candidates by visual distance]
+    I --> J
+    J --> K[Five nearby GZ2 references]
+    H --> L[Field-journal card]
+    K --> L
+```
+
+The browser validates and downsizes the image before sending it through the
+application server. The chosen model returns exactly `spiral` or `elliptical`.
+That label filters a local Galaxy Zoo 2 reference catalog, and a small 16x16
+grayscale descriptor ranks candidates within the matching morphology. An exact
+SHA-256 match recognizes a reference image already present in the catalog.
+
+The candidate ranker is a transparent image-distance heuristic, not a learned
+embedding model. Its five results are visually similar references rather than
+claims that the uploaded galaxy is the same astronomical object. Object IDs,
+coordinates, vote summaries, and descriptions come from the reference catalog;
+the vision model supplies the morphology label. Saved cards remain in browser
+local storage.
+
 ## Run locally
 
 Requirements: Node.js 22.13 or newer.
