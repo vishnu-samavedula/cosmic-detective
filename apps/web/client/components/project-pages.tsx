@@ -195,6 +195,66 @@ export function ModelLabPage() {
         </p>
       </section>
 
+      <section className="model-section">
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">LQH HARNESS / FIELD NOTES</div>
+            <h2>Four practical constraints shaped the experiment.</h2>
+          </div>
+          <span className="small">Observed in this project · September 2026</span>
+        </div>
+        <div className="harness-notes">
+          <article>
+            <Cloud size={20} />
+            <div>
+              <span>COLD START</span>
+              <h3>Warmth changes the demo.</h3>
+              <p>
+                One scaled-down cloud request took 143.8 s; the next warm call
+                took 342 ms. Local MPS removes that wake-up delay.
+              </p>
+            </div>
+          </article>
+          <article>
+            <Database size={20} />
+            <div>
+              <span>METADATA CEILING</span>
+              <h3>The full snapshot could not enter hygiene.</h3>
+              <p>
+                A 40,236-row inventory serialized to 17.54 MB against an 8 MiB
+                request limit. The balanced 12,000-row, 5.23 MB snapshot passed.
+              </p>
+            </div>
+          </article>
+          <article>
+            <Laptop size={20} />
+            <div>
+              <span>LOCAL HANDOFF</span>
+              <h3>An adapter is only half the runtime.</h3>
+              <p>
+                LQH pulled a 5.36 MB LoRA. Local inference also needed its exact
+                867 MB pinned base, PEFT, and a thin serving endpoint.
+              </p>
+            </div>
+          </article>
+          <article>
+            <Gauge size={20} />
+            <div>
+              <span>EVALUATION SIGNAL</span>
+              <h3>A mean score hid the class bias.</h3>
+              <p>
+                The judge moved 7.79 → 9.98. Exact per-class scoring revealed
+                the useful result: spiral recall moved 17% → 99.5%.
+              </p>
+            </div>
+          </article>
+        </div>
+        <p className="model-footnote">
+          These are observations from this run and its recorded versions, not
+          claims that every LQH configuration behaves the same way.
+        </p>
+      </section>
+
       <section className="lab-boundaries">
         <article>
           <CheckCircle2 size={20} />

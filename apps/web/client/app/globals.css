@@ -2209,6 +2209,50 @@ footer a:last-child {
   margin-top: 14px;
   font-size: 11px;
 }
+.harness-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.harness-notes article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 15px;
+  min-height: 170px;
+  padding: 23px;
+  border: 1px solid #3a4449;
+  background: #0d1418;
+}
+.harness-notes article:nth-child(2) {
+  border-color: #62493e;
+  background: #171310;
+}
+.harness-notes article:nth-child(3) {
+  border-color: #3e554b;
+  background: #0e1714;
+}
+.harness-notes article:nth-child(4) {
+  border-color: #50462f;
+  background: #15160f;
+}
+.harness-notes svg {
+  color: var(--primary);
+}
+.harness-notes span {
+  color: #a99b80;
+  font:
+    10px/1.4 var(--font-geist-mono),
+    monospace;
+  letter-spacing: 1px;
+}
+.harness-notes h3 {
+  margin: 8px 0;
+}
+.harness-notes p {
+  color: #93a1a9;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .lab-boundaries {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2394,6 +2438,7 @@ footer a:last-child {
   .model-scoreboard,
   .model-split,
   .lab-boundaries,
+  .harness-notes,
   .about-missions,
   .about-principles,
   .about-sources {
