@@ -224,6 +224,12 @@ The base deployment also serves multi-object grounding. Development or debug
 deployments may scale down while idle, so the first streamed request can take
 longer than subsequent warm requests.
 
+For an entirely local development path using a downloaded Transformers base
+checkpoint and PEFT LoRA adapter, see
+[local inference](services/local_inference/README.md). The local server exposes
+the same OpenAI-compatible route and switches the adapter off or on for the
+base/trained comparison without loading two copies of the base weights.
+
 ## Data
 
 Bulk survey data, generated catalogs, model weights, training runs, and local

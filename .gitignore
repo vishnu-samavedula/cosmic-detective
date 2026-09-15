@@ -66,6 +66,7 @@ artifacts/exports/*
 !artifacts/exports/README.md
 
 # Model weights and exports
+models/
 *.safetensors
 *.ckpt
 *.gguf
