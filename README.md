@@ -34,6 +34,7 @@ establish a physical galaxy type, or replace scientific analysis.
 - Morphology stress tests across rotation, dimming, noise, compression, and crop
 - Browser-local morphology and grounding feedback queue
 - Checkpoint-approval and continual-learning pipeline preview
+- Versioned placeholder contract for feedback-to-training automation
 - Browser-local field journal with JSON export
 - Optional shuffle across a locally prepared 239,000-object catalog
 
@@ -185,6 +186,14 @@ preserves both the original zero-shot boxes and the corrected target boxes. The
 Learning Loop visualizes validation, dataset snapshotting, training, evaluation,
 and promotion stages. Its progress displays are explicitly simulated and do not
 submit cloud training jobs.
+
+The proposed automation is specified in the
+[learning-loop contract](docs/learning-loop.md) and the repository-owned
+[`cosmic-learning-loop` skill](skills/cosmic-learning-loop/SKILL.md). It defines
+separate deterministic dataset pipelines for reviewed morphology labels and
+reviewed grounding boxes, followed by validation, manual or policy approval,
+LQH hygiene, candidate training, and frozen evaluation. The contract is inert:
+the browser export, dataset builders, and training trigger are not implemented.
 
 ## Run locally
 

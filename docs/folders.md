@@ -6,6 +6,7 @@
 | `pipelines/ingest/` | Dataset validation and catalog builders | Yes |
 | `pipelines/evaluate/` | Reproducible evaluation utilities | Yes |
 | `data_gen/`, `prompts/`, `evals/` | Training-example and scoring definitions | Yes |
+| `skills/` | Repository-owned workflow contracts; currently inert | Yes |
 | `data/` | Raw and derived survey data | Placeholder documentation only |
 | `datasets/`, `seed_data/` | Packaged model inputs | No |
 | `runs/`, `training/` | Harness state, job records, and model outputs | No |

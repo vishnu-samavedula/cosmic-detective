@@ -632,9 +632,10 @@ export function LearningLoop({
             {trainingStarted ? 'Snapshot approved' : 'Approve current snapshot'}
           </Button>
           <small>
-            LQH <code>/train</code> is triggered according to the continual
-            learning policy configured in the LQH console. This screen is a
-            preview and does not submit a cloud job.
+            Reviewed labels and reviewed boxes become separate candidate
+            snapshots. After validation and the configured approval gate, the
+            planned workflow hands a new candidate run to LQH. This screen is a
+            preview and does not generate data or submit a cloud job.
           </small>
         </div>
       </div>
