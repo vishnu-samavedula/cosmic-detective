@@ -24,6 +24,8 @@ import {
   RefreshCw,
   FlaskConical,
   BrainCircuit,
+  Atom,
+  Info,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -43,6 +45,7 @@ import {
   type LearningExample,
   type ModelChoice,
 } from '@/components/observatory-labs';
+import { AboutPage, ModelLabPage } from '@/components/project-pages';
 
 type Galaxy = {
   id: string;
@@ -1123,11 +1126,17 @@ export default function Home() {
                 {learningQueue.length.toString().padStart(2, '0')}
               </span>
             </TabsTrigger>
+            <TabsTrigger value="model-lab">
+              <Atom size={16} /> Model Lab
+            </TabsTrigger>
             <TabsTrigger value="collection">
               <BookOpen size={16} /> Collection{' '}
               <span className="count">
                 {cards.length.toString().padStart(2, '0')}
               </span>
+            </TabsTrigger>
+            <TabsTrigger value="about">
+              <Info size={16} /> About
             </TabsTrigger>
           </TabsList>
         </header>
@@ -2051,6 +2060,9 @@ export default function Home() {
             onInvestigate={() => setTab('investigate')}
           />
         </TabsContent>
+        <TabsContent value="model-lab">
+          <ModelLabPage />
+        </TabsContent>
         <TabsContent value="collection">
           <section className="collection">
             <div className="section-heading">
@@ -2154,6 +2166,9 @@ export default function Home() {
               </output>
             )}
           </section>
+        </TabsContent>
+        <TabsContent value="about">
+          <AboutPage />
         </TabsContent>
         <footer>
           <span>
