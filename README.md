@@ -59,12 +59,18 @@ instruction with one expected lowercase label. The labels are grounded in the
 top-level Galaxy Zoo 2 volunteer vote tree. The SFT recipe used three epochs, an
 effective batch size of 16, a learning rate of `5e-4`, and LoRA rank 8.
 
-On the same frozen, object-disjoint set of 400 images, the base model scored
-7.79/10 and the post-trained model scored 9.98/10 using unconstrained decoding
-and the same vision-judge protocol. These scores measure agreement with the
-requested label and output format under this experiment. They are not calibrated
-probabilities, scientific accuracy claims, or evidence that the model can
-identify a unique catalog object.
+On the same frozen, object- and image-disjoint test set of 400 images, exact
+label accuracy improved from **58.5% (234/400)** for the base model to **99.75%
+(399/400)** after post-training. The largest change was spiral recall, which
+improved from **17% (34/200)** to **99.5% (199/200)**; elliptical recall was
+200/200 for both. The secondary vision-judge mean moved from 7.79/10 to 9.98/10.
+Both models used the same prompt and unconstrained decoding configuration.
+
+See [GZ2 post-training results](docs/post-training-results.md) for the label
+policy, complete recipe, evaluation protocol, results, and limits. These
+measurements apply to a high-consensus, in-distribution GZ2 slice. They are not
+calibrated probabilities, scientific accuracy claims, or evidence that the
+model can identify a unique catalog object.
 
 The app connects to separately configured base and trained serving endpoints.
 It does not ship or download either checkpoint. The model's own license and use
